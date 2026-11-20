@@ -28,6 +28,12 @@ Inspired by professional systems such as HikCentral and iVMS, the platform combi
 
 This lets operators follow the status of vehicles attempting to enter the university in real time.
 
+> *Representative UI screenshots (with sample/anonymized data):*
+>
+> ![Live Monitoring Dashboard](assets/live-dashboard.png)
+> ![Vehicle List](assets/ui-vehicle-list.png)
+
+
 ## How It Works
 
 The system is built around two independent pipelines.
@@ -36,26 +42,29 @@ The system is built around two independent pipelines.
 
 ```mermaid
 flowchart LR
-    A["Camera (RTSP)"] --> B["FFmpeg / MediaMTX"]
-    B --> C["HLS"]
+    S["Settings UI (IP & Password)"] -. "Connect" .-> A["IP Camera (RTSP Input)"]
+    A -- "RTSP stream" --> B["FFmpeg"]
+    B --> C["MediaMTX (HLS / WebRTC / RTSP)"]
     C --> D["Browser (Angular)"]
 ```
 
-Camera RTSP streams are processed with FFmpeg and MediaMTX and converted to HLS for playback in the browser. Operators can switch between 1, 4, and 12-camera layouts.
+Cameras are connected through the Settings page using their IP address and password. FFmpeg reads each camera's RTSP stream, performs codec conversion if needed, and converts it to HLS; MediaMTX accepts the stream and distributes it to clients over HLS / WebRTC / RTSP, which the Angular UI pulls for live playback. Operators can switch between 1, 4, and 12-camera layouts.
 
 ### Alarm Event Pipeline
 
 ```mermaid
 flowchart LR
-    E["Camera (plate event)"] --> F["Application"]
-    F --> G["Hangfire job"]
+    E["Hikvision ISAPI (XML + Images)"] --> F["AlarmEventService"]
+    F --> V["Validator"]
+    V --> P["XML Parser"]
+    P --> G["Hangfire Job"]
     G --> H[("MinIO<br/>images")]
-    G --> I[("PostgreSQL<br/>records")]
+    G --> I[("PostgreSQL<br/>Save & Check Lists")]
     G --> J["SignalR"]
-    J --> K["Angular UI"]
+    J --> K["Angular UI (Red Alert / Cards)"]
 ```
 
-The application listens directly for license plate recognition events sent by the cameras. Each event is processed by a Hangfire background job that classifies the plate, registers previously unseen plates automatically, and generates secure image access links. Vehicle, plate, and full-scene images are stored in MinIO, and SignalR pushes the processed event to all connected monitoring clients in real time.
+`AlarmEventService` listens for plate recognition events triggered by **Hikvision ISAPI**. A validator checks payload integrity, and a parser converts the incoming XML into structured event data and images. Background Hangfire jobs save the record to PostgreSQL, store vehicle, plate, and full-scene images in MinIO with secure expiring links, and check whether the plate is on the **Blacklist** or **VIP** list (automatically registering unseen plates). SignalR pushes the result to the Angular UI in real time, triggering a **red alert** on screen if the vehicle is blacklisted.
 
 ## Key Features
 
@@ -68,6 +77,9 @@ The application listens directly for license plate recognition events sent by th
 - Reporting for reviewing recorded plate events
 
 ## Architecture
+
+![Video Stream Architecture Overview](assets/video-stream.png)
+![Representative Alarm Events Architecture](assets/alarm-events.png)
 
 The backend is built with C# and .NET 8 following **Onion Architecture**, with dedicated Domain, Application, Persistence, Infrastructure, and SignalR layers. Application logic is organized with **CQRS**, **MediatR** handlers, and repository interfaces, which keeps business logic independent from infrastructure.
 
